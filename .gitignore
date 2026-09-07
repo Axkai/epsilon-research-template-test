@@ -1,0 +1,5 @@
+# Epsilon project files
+generated/data.csv      # Never commit dummy data - replaced with real data on server
+*.pyc
+__pycache__/
+.epsilon_sdk/

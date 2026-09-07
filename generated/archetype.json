@@ -1,0 +1,107 @@
+{
+  "$id": "96887846-2a4f-42f7-9471-52cc3a3b6a73/yAp2Fgy7HrJT",
+  "$schema": "https://json-schema.org/draft/2020-12/schema#",
+  "title": "DiaBD Diabetes Risk",
+  "type": "object",
+  "properties": {
+    "demographics": {
+      "type": "object",
+      "properties": {
+        "gender": {
+          "type": "string",
+          "description": "Gender"
+        },
+        "age": {
+          "type": "integer",
+          "description": "Age"
+        }
+      }
+    },
+    "diabd_diabetes_risk": {
+      "type": "object",
+      "properties": {}
+    },
+    "vitals": {
+      "type": "object",
+      "properties": {
+        "diastolic_bp": {
+          "type": "integer",
+          "description": "Diastolic BP"
+        },
+        "pulse_rate": {
+          "type": "integer",
+          "description": "Pulse rate"
+        },
+        "systolic_bp": {
+          "type": "integer",
+          "description": "Systolic BP"
+        }
+      }
+    },
+    "anthropometry": {
+      "type": "object",
+      "properties": {
+        "height": {
+          "type": "number",
+          "description": "Height"
+        },
+        "bmi": {
+          "type": "number",
+          "description": "BMI"
+        },
+        "weight": {
+          "type": "number",
+          "description": "Weight"
+        }
+      }
+    },
+    "labs": {
+      "type": "object",
+      "properties": {
+        "glucose": {
+          "type": "number",
+          "description": "Glucose"
+        }
+      }
+    },
+    "history": {
+      "type": "object",
+      "properties": {
+        "hypertensive": {
+          "type": "integer",
+          "description": "Hypertensive"
+        },
+        "family_diabetes": {
+          "type": "integer",
+          "description": "Family diabetes"
+        },
+        "cardiovascular_disease": {
+          "type": "integer",
+          "description": "Cardiovascular disease"
+        },
+        "family_hypertension": {
+          "type": "integer",
+          "description": "Family hypertension"
+        },
+        "stroke": {
+          "type": "integer",
+          "description": "Stroke"
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "properties": {
+        "diabetic": {
+          "type": "string",
+          "description": "Diabetic"
+        }
+      }
+    }
+  },
+  "syntheticData": {
+    "available": true,
+    "schemaHash": "9003a977bf4e5106a1c2dcf7b4eda540511deacc29292cafc64df9131eaae280",
+    "version": 3
+  }
+}
