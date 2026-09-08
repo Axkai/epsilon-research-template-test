@@ -75,6 +75,7 @@ def calculate_descriptive_stats(dataset):
         "Male": {"No": 0, "Yes": 0},
     }
 
+    raw_rows = []
     total_records = 0
 
     for record in dataset:
@@ -98,6 +99,24 @@ def calculate_descriptive_stats(dataset):
         cardiovascular_disease = str(record.history.cardiovascular_disease) if record.history.cardiovascular_disease is not None else "Unknown"
         family_hypertension = str(record.history.family_hypertension) if record.history.family_hypertension is not None else "Unknown"
         stroke = str(record.history.stroke) if record.history.stroke is not None else "Unknown"
+
+        raw_rows.append({
+            "gender": gender,
+            "age": age,
+            "height": height,
+            "weight": weight,
+            "bmi": bmi,
+            "systolic_bp": systolic_bp,
+            "diastolic_bp": diastolic_bp,
+            "pulse_rate": pulse_rate,
+            "glucose": glucose,
+            "hypertensive": hypertensive,
+            "family_diabetes": family_diabetes,
+            "cardiovascular_disease": cardiovascular_disease,
+            "family_hypertension": family_hypertension,
+            "stroke": stroke,
+            "diabetic": diabetic,
+        })
 
         if age is not None: features["age"].append(age)
         if height is not None: features["height"].append(height)
@@ -134,6 +153,23 @@ def calculate_descriptive_stats(dataset):
     print("=" * 140)
     print(f"Total Dataset Records Processed: {total_records}")
     print("-" * 140)
+
+    # 0. DATASET PREVIEW (HEAD - FIRST 30 ROWS)
+    print("\n--- 0. DATASET PREVIEW (HEAD - FIRST 30 ROWS) ---")
+    head_rows = raw_rows[:30]
+    head_header = f"{'Row':<4} | {'Gender':<7} | {'Age':<4} | {'Height':<6} | {'Weight':<6} | {'BMI':<6} | {'SysBP':<5} | {'DiaBP':<5} | {'Pulse':<5} | {'Glucose':<7} | {'Hyp':<3} | {'FamDb':<5} | {'CVD':<3} | {'FamHyp':<6} | {'Strk':<4} | {'Diabetic':<8}"
+    print(head_header)
+    print("-" * len(head_header))
+    for idx, row in enumerate(head_rows, start=1):
+        age_str = f"{int(row['age'])}" if row['age'] is not None else ""
+        ht_str = f"{row['height']:.2f}" if row['height'] is not None else ""
+        wt_str = f"{row['weight']:.1f}" if row['weight'] is not None else ""
+        bmi_str = f"{row['bmi']:.2f}" if row['bmi'] is not None else ""
+        sys_str = f"{int(row['systolic_bp'])}" if row['systolic_bp'] is not None else ""
+        dia_str = f"{int(row['diastolic_bp'])}" if row['diastolic_bp'] is not None else ""
+        pulse_str = f"{int(row['pulse_rate'])}" if row['pulse_rate'] is not None else ""
+        gluc_str = f"{row['glucose']:.2f}" if row['glucose'] is not None else ""
+        print(f"{idx:<4} | {row['gender']:<7} | {age_str:<4} | {ht_str:<6} | {wt_str:<6} | {bmi_str:<6} | {sys_str:<5} | {dia_str:<5} | {pulse_str:<5} | {gluc_str:<7} | {row['hypertensive']:<3} | {row['family_diabetes']:<5} | {row['cardiovascular_disease']:<3} | {row['family_hypertension']:<6} | {row['stroke']:<4} | {row['diabetic']:<8}")
 
     # 1. CONTINUOUS NUMERICAL FEATURES SUMMARY
     num_keys = ["age", "height", "weight", "bmi", "systolic_bp", "diastolic_bp", "pulse_rate", "glucose"]
