@@ -121,27 +121,73 @@ def get_environment_info():
 
 
 def prepare_clinical_data():
-    """Load and preprocess patient dataset for high-compute modeling."""
+    """Load and preprocess patient dataset for high-compute modeling.
+    Robustly handles both Root object wrappers, nested JSON dictionaries, and flattened CSV keys.
+    """
     print("Loading patient cohort dataset...")
     dataset = create_dataset()
-    df = pd.DataFrame(dataset.records)
+
+    rows = []
+    for r in dataset:
+        try:
+            row = {
+                "gender": str(r.demographics.gender) if r.demographics.gender is not None else "Unknown",
+                "age": float(r.demographics.age) if r.demographics.age is not None else 0.0,
+                "height": float(r.anthropometry.height) if r.anthropometry.height is not None else 0.0,
+                "weight": float(r.anthropometry.weight) if r.anthropometry.weight is not None else 0.0,
+                "bmi": float(r.anthropometry.bmi) if r.anthropometry.bmi is not None else 0.0,
+                "systolic_bp": float(r.vitals.systolic_bp) if r.vitals.systolic_bp is not None else 0.0,
+                "diastolic_bp": float(r.vitals.diastolic_bp) if r.vitals.diastolic_bp is not None else 0.0,
+                "pulse_rate": float(r.vitals.pulse_rate) if r.vitals.pulse_rate is not None else 0.0,
+                "glucose": float(r.labs.glucose) if r.labs.glucose is not None else 0.0,
+                "hypertensive": str(r.history.hypertensive) if r.history.hypertensive is not None else "0",
+                "family_diabetes": str(r.history.family_diabetes) if r.history.family_diabetes is not None else "0",
+                "cardiovascular_disease": str(r.history.cardiovascular_disease) if r.history.cardiovascular_disease is not None else "0",
+                "family_hypertension": str(r.history.family_hypertension) if r.history.family_hypertension is not None else "0",
+                "stroke": str(r.history.stroke) if r.history.stroke is not None else "0",
+                "diabetic": str(r.outcome.diabetic) if r.outcome.diabetic is not None else "No",
+            }
+        except Exception:
+            d = r if isinstance(r, dict) else getattr(r, "_data", {})
+            row = {
+                "gender": str(d.get("demographics.gender") or (d.get("demographics") or {}).get("gender", "Unknown")),
+                "age": float(d.get("demographics.age") or (d.get("demographics") or {}).get("age", 0.0) or 0.0),
+                "height": float(d.get("anthropometry.height") or (d.get("anthropometry") or {}).get("height", 0.0) or 0.0),
+                "weight": float(d.get("anthropometry.weight") or (d.get("anthropometry") or {}).get("weight", 0.0) or 0.0),
+                "bmi": float(d.get("anthropometry.bmi") or (d.get("anthropometry") or {}).get("bmi", 0.0) or 0.0),
+                "systolic_bp": float(d.get("vitals.systolic_bp") or (d.get("vitals") or {}).get("systolic_bp", 0.0) or 0.0),
+                "diastolic_bp": float(d.get("vitals.diastolic_bp") or (d.get("vitals") or {}).get("diastolic_bp", 0.0) or 0.0),
+                "pulse_rate": float(d.get("vitals.pulse_rate") or (d.get("vitals") or {}).get("pulse_rate", 0.0) or 0.0),
+                "glucose": float(d.get("labs.glucose") or (d.get("labs") or {}).get("glucose", 0.0) or 0.0),
+                "hypertensive": str(d.get("history.hypertensive") or (d.get("history") or {}).get("hypertensive", "0")),
+                "family_diabetes": str(d.get("history.family_diabetes") or (d.get("history") or {}).get("family_diabetes", "0")),
+                "cardiovascular_disease": str(d.get("history.cardiovascular_disease") or (d.get("history") or {}).get("cardiovascular_disease", "0")),
+                "family_hypertension": str(d.get("history.family_hypertension") or (d.get("history") or {}).get("family_hypertension", "0")),
+                "stroke": str(d.get("history.stroke") or (d.get("history") or {}).get("stroke", "0")),
+                "diabetic": str(d.get("outcome.diabetic") or (d.get("outcome") or {}).get("diabetic", "No")),
+            }
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
 
     numeric_cols = [
-        'demographics.age', 'anthropometry.height', 'anthropometry.weight',
-        'anthropometry.bmi', 'labs.glucose', 'vitals.systolic_bp',
-        'vitals.diastolic_bp', 'vitals.pulse_rate'
+        'age', 'height', 'weight', 'bmi', 'glucose',
+        'systolic_bp', 'diastolic_bp', 'pulse_rate'
     ]
     binary_cols = [
-        'history.hypertensive', 'history.family_diabetes',
-        'history.cardiovascular_disease', 'history.family_hypertension', 'history.stroke'
+        'hypertensive', 'family_diabetes',
+        'cardiovascular_disease', 'family_hypertension', 'stroke'
     ]
 
-    for col in numeric_cols + binary_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+    for col in binary_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
 
     # Encode categorical features
-    df['gender_male'] = (df['demographics.gender'].astype(str).str.lower() == 'male').astype(int)
-    df['is_diabetic'] = (df['outcome.diabetic'].astype(str).str.lower() == 'yes').astype(int)
+    df['gender_male'] = (df['gender'].astype(str).str.lower() == 'male').astype(int)
+    df['is_diabetic'] = (df['diabetic'].astype(str).str.lower().isin(['yes', '1', 'true'])).astype(int)
 
     feature_cols = numeric_cols + binary_cols + ['gender_male']
     X = df[feature_cols].values
@@ -242,7 +288,7 @@ def benchmark_polynomial_lasso(X_scaled, df, numeric_cols):
     n_expanded_features = X_poly.shape[1]
 
     # Target: Fasting glucose
-    y_target = df['labs.glucose'].values
+    y_target = df['glucose'].values
 
     # Run 5-fold cross-validated LASSO across 100 alpha penalties
     lasso_cv = LassoCV(cv=5, max_iter=2500, random_state=42, n_jobs=2)
@@ -275,8 +321,8 @@ def benchmark_massive_bootstrap(df, y):
     n_batches = n_resamples // batch_size
 
     diab_mask = (y == 1)
-    g_diab = df.loc[diab_mask, 'labs.glucose'].values
-    g_nondiab = df.loc[~diab_mask, 'labs.glucose'].values
+    g_diab = df.loc[diab_mask, 'glucose'].values
+    g_nondiab = df.loc[~diab_mask, 'glucose'].values
     n_d = len(g_diab)
     n_nd = len(g_nondiab)
 

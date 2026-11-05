@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-11-05 08:39:36 UTC",
-  "total_runtime_sec": 26.61,
+  "timestamp": "2026-11-05 09:07:21 UTC",
+  "total_runtime_sec": 27.02,
   "environment": {
     "platform": "Windows-11-10.0.26200-SP0",
     "python_version": "3.14.2",
@@ -9,48 +9,48 @@
     "logical_cpus": 8,
     "allowed_cpus": 8,
     "total_ram_gb": 15.66,
-    "available_ram_gb": 1.35,
+    "available_ram_gb": 0.7,
     "physical_cpus": 8,
-    "blas_backend": "Optimized BLAS (OpenBLAS/MKL/Accelerate)"
+    "blas_backend": "OpenBLAS"
   },
   "manifold_learning": {
-    "kpca_elapsed_sec": 0.73,
-    "tsne_elapsed_sec": 7.907,
-    "total_elapsed_sec": 8.637,
+    "kpca_elapsed_sec": 0.814,
+    "tsne_elapsed_sec": 7.226,
+    "total_elapsed_sec": 8.04,
     "pairwise_distance_evals": 13978828,
     "kl_divergence": 1.517
   },
   "tree_ensemble": {
-    "elapsed_sec": 9.374,
+    "elapsed_sec": 9.632,
     "total_trees_trained": 1200,
-    "trees_per_sec": 128.0,
+    "trees_per_sec": 124.6,
     "cv_roc_auc_mean": 0.6211,
     "cv_roc_auc_std": 0.0227,
     "feature_ranking": [
       [
-        "anthropometry.bmi",
+        "bmi",
         0.007545385779122504
       ],
       [
-        "demographics.age",
+        "age",
         0.0074697428139182676
       ],
       [
-        "labs.glucose",
+        "glucose",
         0.0072617246596066165
       ],
       [
-        "history.hypertensive",
+        "hypertensive",
         0.007072617246596025
       ],
       [
-        "vitals.pulse_rate",
+        "pulse_rate",
         0.006996974281391788
       ]
     ]
   },
   "polynomial_lasso": {
-    "elapsed_sec": 0.132,
+    "elapsed_sec": 0.089,
     "original_features": 6,
     "expanded_features": 83,
     "optimal_alpha": 0.05387,
@@ -58,15 +58,15 @@
     "sparsity_ratio_pct": 96.4
   },
   "bootstrap_resampling": {
-    "elapsed_sec": 1.804,
+    "elapsed_sec": 2.24,
     "total_resamples": 50000,
-    "throughput_iter_sec": 27719.9,
+    "throughput_iter_sec": 22320.0,
     "point_estimate": 0.311,
     "ci_95_low": -0.052,
     "ci_95_high": 0.686
   },
   "gaussian_mixture": {
-    "elapsed_sec": 1.498,
+    "elapsed_sec": 1.49,
     "k_range": [
       2,
       3,
@@ -98,11 +98,11 @@
     "total_em_iterations": 300
   },
   "deep_autoencoder": {
-    "elapsed_sec": 5.023,
+    "elapsed_sec": 5.145,
     "target_epochs": 150,
     "actual_epochs": 150,
     "final_loss_mse": 0.13878,
-    "samples_per_sec": 157912.1,
+    "samples_per_sec": 154181.2,
     "loss_curve": [
       0.14016,
       0.14029,
