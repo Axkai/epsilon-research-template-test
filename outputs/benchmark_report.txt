@@ -1,0 +1,71 @@
+================================================================================
+            EXECUTION ENVIRONMENT PERFORMANCE BENCHMARK REPORT
+================================================================================
+Timestamp: 2026-11-05 08:16:02 UTC
+
+1. ENVIRONMENT & HARDWARE PROFILE
+--------------------------------------------------------------------------------
+  Operating System  : Windows-11-10.0.26200-SP0
+  Machine / Arch    : AMD64
+  Processor Type    : Intel64 Family 6 Model 189 Stepping 1, GenuineIntel
+  Logical CPU Cores : 8
+  Physical CPU Cores: 8
+  Allowed CPU Cores : 8
+  Total System RAM  : 15.66 GB
+  Available RAM     : 1.13 GB
+  Python Version    : 3.14.2
+  Linear Algebra    : Optimized BLAS (OpenBLAS/MKL/Accelerate)
+
+2. MATRIX MULTIPLICATION & VECTOR COMPUTE (GEMM GFLOPS)
+--------------------------------------------------------------------------------
+  Precision            | Matrix Size (N) | Time (sec)   | Throughput (GFLOPS) 
+  ---------------------+-----------------+--------------+---------------------
+  Float32 (Single)     | 1000            | 0.0066       | 301.45              
+  Float32 (Single)     | 2000            | 0.0709       | 225.68              
+  Float32 (Single)     | 3000            | 0.1324       | 407.98              
+  Float64 (Double)     | 1000            | 0.0223       | 89.67               
+  Float64 (Double)     | 2000            | 0.0760       | 210.63              
+  Float64 (Double)     | 3000            | 0.2518       | 214.49              
+
+3. MULTI-CORE CONCURRENCY & PARALLEL SCALING
+--------------------------------------------------------------------------------
+  Workers    | Elapsed (sec)   | Speedup Factor   | Parallel Efficiency 
+  -----------+-----------------+------------------+---------------------
+  1          | 5.1380          | 1.00            x | 100.0               %
+  2          | 3.9612          | 1.30            x | 64.9                %
+  4          | 4.0413          | 1.27            x | 31.8                %
+  8          | 4.9860          | 1.03            x | 12.9                %
+
+4. MEMORY BANDWIDTH THROUGHPUT (STREAM BENCHMARK)
+--------------------------------------------------------------------------------
+  Vector Size       : 15,000,000 elements (120 MB per vector)
+  Vector Copy Rate  :     4.35 GB/s
+  Vector Scale Rate :     6.15 GB/s
+  Vector Add Rate   :    25.50 GB/s
+  Vector Triad Rate :     3.74 GB/s
+  Peak Bandwidth    :    25.50 GB/s
+
+5. DOMAIN STATISTICAL WORKLOAD (PATIENT RECORD BOOTSTRAP)
+--------------------------------------------------------------------------------
+  Dataset Records   : 5,288 rows
+  Bootstrap Samples : 3,000 resamples
+  Elapsed Time      : 0.435 seconds
+  Resampling Speed  :   6902.6 iterations/sec
+  Mean Glucose Diff : 0.31 mmol/L
+  Bootstrap 95% CI  : [-0.06, 0.69] mmol/L
+
+6. FILESYSTEM & OUTPUT DISK I/O PERFORMANCE
+--------------------------------------------------------------------------------
+  Test File Size    : 40 MB
+  Sequential Write  :   738.88 MB/s
+  Sequential Read   :  1644.17 MB/s
+
+7. ENVIRONMENT PERFORMANCE VERDICT
+--------------------------------------------------------------------------------
+  Compute Grade     : Peak 408.0 GFLOPS (Float32)
+  Parallel Grade    : 8 workers -> 1.03x speedup (12.9% efficiency)
+  Memory Grade      : 25.5 GB/s peak bandwidth
+  Storage Grade     : 738.88 MB/s write / 1644.17 MB/s read
+================================================================================
+                             END OF BENCHMARK REPORT
+================================================================================
