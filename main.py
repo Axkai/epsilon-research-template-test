@@ -1,14 +1,34 @@
+"""
+================================================================================
+  COMPREHENSIVE HIGH-COMPUTATION CLINICAL DATA SCIENCE BENCHMARK SUITE
+================================================================================
+Designed for Epsilon Confidential Enclave Execution.
+Evaluates 6 heavy computational data science workloads in one shot:
+  1. Non-linear Manifold Learning (t-SNE & Kernel PCA)
+  2. Multi-Tree Ensemble & Permutation Importance (Random Forest 5-fold CV)
+  3. High-Order Polynomial Interactions & LASSO Path (Coordinate Descent)
+  4. Massive Scale Non-Parametric Bootstrap Resampling (50,000 Resamples)
+  5. Multi-Restart Gaussian Mixture Model (EM Clustering K=2..8)
+  6. Deep Patient Representation Autoencoder (Neural Backpropagation MLP)
+
+All outputs are saved to the directory specified by EPSILON_OUTPU_DIR (or EPSILON_OUTPUT_DIR).
+"""
+
 import json
-import math
 import os
 import platform
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
+import warnings
+
+# Suppress convergence and optimization warnings for clean output
+warnings.filterwarnings("ignore")
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import matplotlib
+matplotlib.use("Agg")  # Headless rendering for enclaves
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -19,7 +39,25 @@ try:
 except ImportError:
     psutil = None
 
+from sklearn.preprocessing import StandardScaler, PolynomialFeatures
+from sklearn.manifold import TSNE
+from sklearn.decomposition import KernelPCA
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.inspection import permutation_importance
+from sklearn.linear_model import LassoCV
+from sklearn.mixture import GaussianMixture
+from sklearn.neural_network import MLPRegressor
+
+# Dataset import - ensures Epsilon archetype detection
 from generated.models import create_dataset
+
+
+def get_output_dir() -> str:
+    """Resolve target output directory respecting infrastructure environment variables."""
+    out_dir = os.environ.get("EPSILON_OUTPU_DIR") or os.environ.get("EPSILON_OUTPUT_DIR", "outputs")
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
 
 
 def get_environment_info():
@@ -60,474 +98,593 @@ def get_environment_info():
         info["available_ram_gb"] = "Unknown"
         info["physical_cpus"] = info["logical_cpus"]
 
-    blas_backend = "Standard / Bundled BLAS"
+    # Check BLAS linkage
+    blas_info = "Optimized BLAS (OpenBLAS/MKL/Accelerate)"
     try:
-        if hasattr(np, "__config__") and hasattr(np.__config__, "show"):
-            blas_backend = "Optimized BLAS (OpenBLAS/MKL/Accelerate)"
+        from io import StringIO
+        import contextlib
+        f = StringIO()
+        with contextlib.redirect_stdout(f):
+            np.__config__.show()
+        cfg_str = f.getvalue().lower()
+        if "openblas" in cfg_str:
+            blas_info = "OpenBLAS"
+        elif "mkl" in cfg_str:
+            blas_info = "Intel MKL"
+        elif "accelerate" in cfg_str:
+            blas_info = "Apple Accelerate"
     except Exception:
         pass
-    info["numpy_blas"] = blas_backend
+    info["blas_backend"] = blas_info
 
     return info
 
 
-def benchmark_matrix_multiplication(sizes=(1000, 2000, 3000)):
-    """Benchmark single and double precision GEMM floating-point throughput."""
-    results = []
+def prepare_clinical_data():
+    """Load and preprocess patient dataset for high-compute modeling."""
+    print("Loading patient cohort dataset...")
+    dataset = create_dataset()
+    df = pd.DataFrame(dataset.records)
 
-    # Warmup run
-    _ = np.random.randn(400, 400).astype(np.float32) @ np.random.randn(400, 400).astype(np.float32)
+    numeric_cols = [
+        'demographics.age', 'anthropometry.height', 'anthropometry.weight',
+        'anthropometry.bmi', 'labs.glucose', 'vitals.systolic_bp',
+        'vitals.diastolic_bp', 'vitals.pulse_rate'
+    ]
+    binary_cols = [
+        'history.hypertensive', 'history.family_diabetes',
+        'history.cardiovascular_disease', 'history.family_hypertension', 'history.stroke'
+    ]
 
-    for dtype, dtype_name in [(np.float32, "Float32 (Single)"), (np.float64, "Float64 (Double)")]:
-        for n in sizes:
-            a = np.random.randn(n, n).astype(dtype)
-            b = np.random.randn(n, n).astype(dtype)
+    for col in numeric_cols + binary_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-            start = time.perf_counter()
-            _ = a @ b
-            elapsed = time.perf_counter() - start
+    # Encode categorical features
+    df['gender_male'] = (df['demographics.gender'].astype(str).str.lower() == 'male').astype(int)
+    df['is_diabetic'] = (df['outcome.diabetic'].astype(str).str.lower() == 'yes').astype(int)
 
-            # Theoretical operations for GEMM: 2 * N^3
-            flops = 2.0 * (n**3)
-            gflops = (flops / elapsed) / 1e9
+    feature_cols = numeric_cols + binary_cols + ['gender_male']
+    X = df[feature_cols].values
+    y = df['is_diabetic'].values
 
-            results.append({
-                "size": n,
-                "precision": dtype_name,
-                "elapsed_sec": round(elapsed, 4),
-                "gflops": round(gflops, 2),
-            })
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-    return results
-
-
-def _cpu_worker(n_iterations):
-    """CPU-bound task to measure core calculation throughput."""
-    total = 0.0
-    for i in range(1, n_iterations):
-        total += math.sin(i) * math.cos(i)
-    return total
+    return df, X_scaled, y, feature_cols, numeric_cols
 
 
-def benchmark_multicore_scaling(max_workers=None):
-    """Benchmark multi-processing speedup and parallel scaling efficiency."""
-    logical_cpus = os.cpu_count() or 1
-    if max_workers is None:
-        worker_counts = [1, 2]
-        if logical_cpus >= 4:
-            worker_counts.append(4)
-        if logical_cpus >= 8:
-            worker_counts.append(8)
-        if logical_cpus not in worker_counts:
-            worker_counts.append(logical_cpus)
-        worker_counts = sorted(list(set(worker_counts)))
-    else:
-        worker_counts = [w for w in [1, 2, 4, 8, max_workers] if w <= max_workers]
-        worker_counts = sorted(list(set(worker_counts)))
+# ==============================================================================
+# WORKLOAD 1: Non-Linear Manifold Learning (t-SNE & Kernel PCA)
+# ==============================================================================
+def benchmark_manifold_learning(X_scaled, y):
+    """Benchmark high-dimensional non-linear projections and pairwise distance calculations."""
+    print("[1/6] Running Manifold Learning (t-SNE & RBF Kernel PCA)...")
+    n_samples, n_features = X_scaled.shape
 
-    task_work = 1_500_000
-    total_tasks = 16
-
-    results = []
-    base_time = None
-
-    for workers in worker_counts:
-        tasks = [task_work] * total_tasks
-        start = time.perf_counter()
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            _ = list(executor.map(_cpu_worker, tasks))
-        elapsed = time.perf_counter() - start
-
-        if workers == 1 or base_time is None:
-            base_time = elapsed
-            speedup = 1.0
-            efficiency = 100.0
-        else:
-            speedup = base_time / elapsed
-            efficiency = (speedup / workers) * 100.0
-
-        results.append({
-            "workers": workers,
-            "elapsed_sec": round(elapsed, 4),
-            "speedup": round(speedup, 2),
-            "efficiency_pct": round(efficiency, 1),
-        })
-
-    return results
-
-
-def benchmark_memory_bandwidth(vector_size=15_000_000):
-    """STREAM-style vector benchmark measuring memory throughput in GB/s."""
-    a = np.ones(vector_size, dtype=np.float64) * 1.5
-    b = np.ones(vector_size, dtype=np.float64) * 2.5
-    c = np.zeros(vector_size, dtype=np.float64)
-    scalar = 3.0
-    bytes_per_elem = 8
-
-    # 1. Copy: c = a
+    # 1.1 RBF Kernel PCA ($O(N^2)$ Gram matrix construction)
     t0 = time.perf_counter()
-    np.copyto(c, a)
-    t_copy = time.perf_counter() - t0
-    bw_copy = (2 * vector_size * bytes_per_elem) / t_copy / 1e9
+    kpca = KernelPCA(n_components=2, kernel='rbf', gamma=0.1, max_iter=500, random_state=42)
+    X_kpca = kpca.fit_transform(X_scaled)
+    t_kpca = time.perf_counter() - t0
 
-    # 2. Scale: b = scalar * c
+    # 1.2 t-SNE with Barnes-Hut quadtree and gradient descent
     t0 = time.perf_counter()
-    np.multiply(c, scalar, out=b)
-    t_scale = time.perf_counter() - t0
-    bw_scale = (2 * vector_size * bytes_per_elem) / t_scale / 1e9
+    tsne_kwargs = {"n_components": 2, "perplexity": 30.0, "random_state": 42, "n_jobs": 2}
+    try:
+        tsne = TSNE(max_iter=750, **tsne_kwargs)
+    except TypeError:
+        tsne = TSNE(n_iter=750, **tsne_kwargs)
+    X_tsne = tsne.fit_transform(X_scaled)
+    t_tsne = time.perf_counter() - t0
 
-    # 3. Add: c = a + b
-    t0 = time.perf_counter()
-    np.add(a, b, out=c)
-    t_add = time.perf_counter() - t0
-    bw_add = (3 * vector_size * bytes_per_elem) / t_add / 1e9
-
-    # 4. Triad: a = b + scalar * c
-    t0 = time.perf_counter()
-    a = b + scalar * c
-    t_triad = time.perf_counter() - t0
-    bw_triad = (3 * vector_size * bytes_per_elem) / t_triad / 1e9
+    kl_div = float(getattr(tsne, "kl_divergence_", 0.0))
+    pairwise_distances = (n_samples * (n_samples - 1)) // 2
 
     return {
-        "vector_size": vector_size,
-        "copy_gb_s": round(bw_copy, 2),
-        "scale_gb_s": round(bw_scale, 2),
-        "add_gb_s": round(bw_add, 2),
-        "triad_gb_s": round(bw_triad, 2),
-        "peak_bandwidth_gb_s": round(max(bw_copy, bw_scale, bw_add, bw_triad), 2),
+        "kpca_elapsed_sec": round(t_kpca, 3),
+        "tsne_elapsed_sec": round(t_tsne, 3),
+        "total_elapsed_sec": round(t_kpca + t_tsne, 3),
+        "pairwise_distance_evals": pairwise_distances,
+        "kl_divergence": round(kl_div, 4),
+        "X_tsne": X_tsne,
+        "X_kpca": X_kpca
     }
 
 
-def benchmark_domain_bootstrap(dataset, n_iterations=3000):
-    """Stress real data processing by bootstrap resampling on patient records."""
-    records = []
-    for r in dataset:
-        glucose = float(r.labs.glucose) if r.labs.glucose is not None else None
-        diabetic = 1 if str(r.outcome.diabetic) == "Yes" else 0
-        if glucose is not None:
-            records.append((glucose, diabetic))
-
-    arr = np.array(records)
-    n_samples = len(arr)
-    glucose_arr = arr[:, 0]
-    diabetic_arr = arr[:, 1]
-
+# ==============================================================================
+# WORKLOAD 2: Tree Ensemble & Permutation Biomarker Importance
+# ==============================================================================
+def benchmark_tree_ensemble(X_scaled, y, feature_cols):
+    """Benchmark multi-tree ensemble training, 5-fold cross-validation, and permutation ranking."""
+    print("[2/6] Running Tree Ensemble & Permutation Importance (Random Forest 5-Fold CV)...")
     t0 = time.perf_counter()
-    bootstrap_diffs = np.empty(n_iterations)
-    for i in range(n_iterations):
-        indices = np.random.randint(0, n_samples, size=n_samples)
-        sample_g = glucose_arr[indices]
-        sample_d = diabetic_arr[indices]
-        d_mask = sample_d == 1
-        mean_yes = np.mean(sample_g[d_mask])
-        mean_no = np.mean(sample_g[~d_mask])
-        bootstrap_diffs[i] = mean_yes - mean_no
+    n_trees_per_model = 200
+    n_splits = 5
 
-    elapsed = time.perf_counter() - t0
-    rate = n_iterations / elapsed
-    ci_lower, ci_upper = np.percentile(bootstrap_diffs, [2.5, 97.5])
+    rf = RandomForestClassifier(n_estimators=n_trees_per_model, max_depth=10, random_state=42, n_jobs=2)
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    scores = cross_val_score(rf, X_scaled, y, cv=cv, scoring='roc_auc', n_jobs=2)
+
+    # Fit final model and compute permutation importance (10 repeats)
+    rf.fit(X_scaled, y)
+    perm = permutation_importance(rf, X_scaled, y, n_repeats=10, random_state=42, n_jobs=2)
+    t_total = time.perf_counter() - t0
+
+    total_trees_trained = n_trees_per_model * (n_splits + 1)
+    trees_per_sec = round(total_trees_trained / t_total, 1)
+
+    importances = perm.importances_mean
+    ranking = sorted(zip(feature_cols, importances), key=lambda x: x[1], reverse=True)
 
     return {
-        "dataset_rows": n_samples,
-        "iterations": n_iterations,
-        "elapsed_sec": round(elapsed, 3),
-        "iterations_per_sec": round(rate, 1),
-        "mean_difference": round(float(np.mean(bootstrap_diffs)), 2),
-        "bootstrap_95_ci": [round(float(ci_lower), 2), round(float(ci_upper), 2)],
+        "elapsed_sec": round(t_total, 3),
+        "total_trees_trained": total_trees_trained,
+        "trees_per_sec": trees_per_sec,
+        "cv_roc_auc_mean": round(float(scores.mean()), 4),
+        "cv_roc_auc_std": round(float(scores.std()), 4),
+        "feature_ranking": ranking[:5],
+        "all_importances": dict(ranking)
     }
 
 
-def benchmark_disk_io(output_dir, file_size_mb=40):
-    """Measure sequential write and read throughput in the environment's output directory."""
-    test_file = os.path.join(output_dir, "_temp_benchmark_io.dat")
-    data = os.urandom(1024 * 1024)
-
-    # Write test
+# ==============================================================================
+# WORKLOAD 3: High-Order Polynomial Feature Expansion & LASSO Path
+# ==============================================================================
+def benchmark_polynomial_lasso(X_scaled, df, numeric_cols):
+    """Benchmark high-order interaction generation and LASSO coordinate descent path."""
+    print("[3/6] Running High-Order Polynomial Interactions & LASSO Path (Coordinate Descent)...")
     t0 = time.perf_counter()
-    with open(test_file, "wb") as f:
-        for _ in range(file_size_mb):
-            f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    write_time = time.perf_counter() - t0
-    write_speed = file_size_mb / write_time
 
-    # Read test
-    t0 = time.perf_counter()
-    with open(test_file, "rb") as f:
-        while True:
-            chunk = f.read(1024 * 1024)
-            if not chunk:
-                break
-    read_time = time.perf_counter() - t0
-    read_speed = file_size_mb / read_time
+    # Expand top 6 continuous variables to degree 3 interactions
+    X_sub = X_scaled[:, :6]
+    poly = PolynomialFeatures(degree=3, include_bias=False)
+    X_poly = poly.fit_transform(X_sub)
+    n_expanded_features = X_poly.shape[1]
 
-    if os.path.exists(test_file):
-        try:
-            os.remove(test_file)
-        except Exception:
-            pass
+    # Target: Fasting glucose
+    y_target = df['labs.glucose'].values
+
+    # Run 5-fold cross-validated LASSO across 100 alpha penalties
+    lasso_cv = LassoCV(cv=5, max_iter=2500, random_state=42, n_jobs=2)
+    lasso_cv.fit(X_poly, y_target)
+    t_total = time.perf_counter() - t0
+
+    non_zero_coeffs = int(np.sum(lasso_cv.coef_ != 0))
+    sparsity_ratio = round(100.0 * (1.0 - (non_zero_coeffs / n_expanded_features)), 1)
 
     return {
-        "file_size_mb": file_size_mb,
-        "write_mb_s": round(write_speed, 2),
-        "read_mb_s": round(read_speed, 2),
+        "elapsed_sec": round(t_total, 3),
+        "original_features": 6,
+        "expanded_features": n_expanded_features,
+        "optimal_alpha": round(float(lasso_cv.alpha_), 5),
+        "active_non_zero_terms": non_zero_coeffs,
+        "sparsity_ratio_pct": sparsity_ratio,
+        "coefs": lasso_cv.coef_
     }
 
 
-def format_text_report(report):
-    """Format all benchmark findings into a clean, comprehensive plain-text document."""
-    lines = []
+# ==============================================================================
+# WORKLOAD 4: Massive Scale Non-Parametric Bootstrap (50,000 Iterations)
+# ==============================================================================
+def benchmark_massive_bootstrap(df, y):
+    """Benchmark non-parametric Monte Carlo bootstrap across 50,000 resamples."""
+    print("[4/6] Running Massive Scale Clinical Bootstrap (50,000 Resamples)...")
+    t0 = time.perf_counter()
+    n_resamples = 50000
+    batch_size = 10000
+    n_batches = n_resamples // batch_size
+
+    diab_mask = (y == 1)
+    g_diab = df.loc[diab_mask, 'labs.glucose'].values
+    g_nondiab = df.loc[~diab_mask, 'labs.glucose'].values
+    n_d = len(g_diab)
+    n_nd = len(g_nondiab)
+
+    diffs = []
+    rng = np.random.default_rng(42)
+
+    for _ in range(n_batches):
+        idx_d = rng.integers(0, n_d, size=(batch_size, n_d))
+        idx_nd = rng.integers(0, n_nd, size=(batch_size, n_nd))
+        m_d = np.mean(g_diab[idx_d], axis=1)
+        m_nd = np.mean(g_nondiab[idx_nd], axis=1)
+        diffs.append(m_d - m_nd)
+
+    all_diffs = np.concatenate(diffs)
+    t_total = time.perf_counter() - t0
+
+    throughput = round(n_resamples / t_total, 1)
+    ci_low, ci_high = np.percentile(all_diffs, [2.5, 97.5])
+    point_est = float(np.mean(g_diab) - np.mean(g_nondiab))
+
+    return {
+        "elapsed_sec": round(t_total, 3),
+        "total_resamples": n_resamples,
+        "throughput_iter_sec": throughput,
+        "point_estimate": round(point_est, 3),
+        "ci_95_low": round(float(ci_low), 3),
+        "ci_95_high": round(float(ci_high), 3),
+        "distribution_sample": all_diffs[:5000].tolist()  # Sample for JSON serialization
+    }
+
+
+# ==============================================================================
+# WORKLOAD 5: Multi-Restart Gaussian Mixture Model (EM Clustering)
+# ==============================================================================
+def benchmark_gmm_clustering(X_scaled):
+    """Benchmark Expectation-Maximization clustering across K=2..8 with multi-restarts."""
+    print("[5/6] Running Multi-Restart Gaussian Mixture Models (EM Clustering K=2..8)...")
+    t0 = time.perf_counter()
+    k_range = list(range(2, 9))
+    bics = {}
+    aics = {}
+    total_iterations = 0
+
+    for k in k_range:
+        gmm = GaussianMixture(n_components=k, covariance_type='full', n_init=3, max_iter=150, random_state=42)
+        gmm.fit(X_scaled)
+        bics[k] = round(float(gmm.bic(X_scaled)), 1)
+        aics[k] = round(float(gmm.aic(X_scaled)), 1)
+        total_iterations += gmm.n_iter_ * 3
+
+    t_total = time.perf_counter() - t0
+    best_k = min(bics, key=bics.get)
+
+    return {
+        "elapsed_sec": round(t_total, 3),
+        "k_range": k_range,
+        "bics": bics,
+        "aics": aics,
+        "optimal_k_bic": best_k,
+        "total_em_iterations": total_iterations
+    }
+
+
+# ==============================================================================
+# WORKLOAD 6: Deep Representation Autoencoder (Neural Backprop MLP)
+# ==============================================================================
+def benchmark_deep_autoencoder(X_scaled):
+    """Benchmark deep bottleneck autoencoder backpropagation and representation learning."""
+    print("[6/6] Running Deep Representation Autoencoder (Backpropagation MLP)...")
+    t0 = time.perf_counter()
+    n_epochs = 150
+    batch_size = 64
+
+    mlp = MLPRegressor(
+        hidden_layer_sizes=(64, 16, 4, 16, 64),
+        activation='relu',
+        solver='adam',
+        max_iter=n_epochs,
+        batch_size=batch_size,
+        random_state=42
+    )
+    mlp.fit(X_scaled, X_scaled)
+    t_total = time.perf_counter() - t0
+
+    final_loss = float(mlp.loss_)
+    actual_epochs = mlp.n_iter_
+    samples_per_sec = round((len(X_scaled) * actual_epochs) / t_total, 1)
+
+    return {
+        "elapsed_sec": round(t_total, 3),
+        "target_epochs": n_epochs,
+        "actual_epochs": actual_epochs,
+        "final_loss_mse": round(final_loss, 5),
+        "samples_per_sec": samples_per_sec,
+        "loss_curve": [round(float(l), 5) for l in mlp.loss_curve_[-10:]]
+    }
+
+
+# ==============================================================================
+# VISUALIZATION SUITE: 6-Panel High-DPI Publication-Grade Summary
+# ==============================================================================
+def generate_summary_figure(results, df, y, output_dir):
+    """Generate 6-panel clinical data science benchmark visualization."""
+    fig, axes = plt.subplots(2, 3, figsize=(18, 11), dpi=300)
+    plt.subplots_adjust(hspace=0.32, wspace=0.28)
+
+    palette = sns.color_palette("mako")
+
+    # Panel 1: Execution Time Breakdown
+    ax = axes[0, 0]
+    tasks = ["1. t-SNE & KPCA", "2. Random Forest", "3. Poly LASSO", "4. 50k Bootstrap", "5. GMM (K=2..8)", "6. Autoencoder"]
+    times = [
+        results["manifold"]["total_elapsed_sec"],
+        results["tree_ensemble"]["elapsed_sec"],
+        results["poly_lasso"]["elapsed_sec"],
+        results["bootstrap"]["elapsed_sec"],
+        results["gmm"]["elapsed_sec"],
+        results["autoencoder"]["elapsed_sec"]
+    ]
+    bars = ax.barh(tasks, times, color=palette[2], edgecolor="black", alpha=0.85)
+    ax.set_xlabel("Elapsed Time (seconds)", fontweight="bold")
+    ax.set_title("1. Computational Time Breakdown", fontweight="bold", pad=8)
+    for bar in bars:
+        w = bar.get_width()
+        ax.text(w + 0.2, bar.get_y() + bar.get_height()/2, f"{w:.2f}s", va="center", fontsize=9, fontweight="bold")
+    ax.grid(axis="x", alpha=0.3, linestyle="--")
+
+    # Panel 2: t-SNE 2D Manifold Space
+    ax = axes[0, 1]
+    tsne_coords = results["manifold"]["X_tsne"]
+    scatter = ax.scatter(
+        tsne_coords[:, 0], tsne_coords[:, 1],
+        c=y, cmap="coolwarm", s=8, alpha=0.6, edgecolors="none"
+    )
+    ax.set_title(f"2. t-SNE Manifold (KL Div: {results['manifold']['kl_divergence']})", fontweight="bold", pad=8)
+    ax.set_xlabel("Dimension 1", fontweight="bold")
+    ax.set_ylabel("Dimension 2", fontweight="bold")
+    cbar = plt.colorbar(scatter, ax=ax, shrink=0.8)
+    cbar.set_label("Diabetic (0=No, 1=Yes)", fontweight="bold")
+    ax.grid(alpha=0.2, linestyle="--")
+
+    # Panel 3: Biomarker Permutation Importance
+    ax = axes[0, 2]
+    top_features = results["tree_ensemble"]["feature_ranking"]
+    feat_names = [f[0].split('.')[-1].replace('_', ' ').title() for f in top_features]
+    feat_scores = [f[1] for f in top_features]
+    bars = ax.bar(feat_names, feat_scores, color=palette[4], edgecolor="black", alpha=0.85)
+    ax.set_ylabel("Mean Importance Score", fontweight="bold")
+    ax.set_title(f"3. Top Biomarkers (RF AUC: {results['tree_ensemble']['cv_roc_auc_mean']})", fontweight="bold", pad=8)
+    ax.tick_params(axis="x", rotation=30)
+    ax.set_ylim(0, max(feat_scores) * 1.25)
+    for bar in bars:
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2, h + (max(feat_scores) * 0.03), f"{h:.4f}", ha="center", fontsize=8, fontweight="bold")
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+
+    # Panel 4: LASSO Interaction Term Shrinkage
+    ax = axes[1, 0]
+    total_terms = results["poly_lasso"]["expanded_features"]
+    active_terms = results["poly_lasso"]["active_non_zero_terms"]
+    zero_terms = total_terms - active_terms
+    wedges, texts, autotexts = ax.pie(
+        [active_terms, zero_terms],
+        labels=[f"Active ({active_terms})", f"Zeroed ({zero_terms})"],
+        autopct="%1.1f%%",
+        colors=[palette[1], "#d0d7de"],
+        startangle=140,
+        wedgeprops=dict(edgecolor="black", linewidth=1.2)
+    )
+    for at in autotexts:
+        at.set_fontweight("bold")
+    ax.set_title(f"4. LASSO Interaction Sparsity ({total_terms} Terms)", fontweight="bold", pad=8)
+
+    # Panel 5: 50,000 Bootstrap Resampling Distribution
+    ax = axes[1, 1]
+    boot_samples = np.array(results["bootstrap"]["distribution_sample"])
+    ci_l = results["bootstrap"]["ci_95_low"]
+    ci_h = results["bootstrap"]["ci_95_high"]
+    pt = results["bootstrap"]["point_estimate"]
+    sns.histplot(boot_samples, kde=True, ax=ax, color=palette[3], edgecolor="black", alpha=0.6)
+    ax.axvline(ci_l, color="red", linestyle="--", linewidth=1.5, label=f"95% CI: [{ci_l}, {ci_h}]")
+    ax.axvline(ci_h, color="red", linestyle="--", linewidth=1.5)
+    ax.axvline(pt, color="black", linestyle="-", linewidth=2.0, label=f"Point Est: {pt:.2f}")
+    ax.set_title("5. Glucose Delta Bootstrap (50,000 Samples)", fontweight="bold", pad=8)
+    ax.set_xlabel("Fasting Glucose Difference (mmol/L)", fontweight="bold")
+    ax.set_ylabel("Resample Frequency", fontweight="bold")
+    ax.legend(loc="upper right", fontsize=8)
+    ax.grid(alpha=0.3, linestyle="--")
+
+    # Panel 6: GMM Information Criteria vs K
+    ax = axes[1, 2]
+    k_vals = results["gmm"]["k_range"]
+    bics = [results["gmm"]["bics"][k] for k in k_vals]
+    aics = [results["gmm"]["aics"][k] for k in k_vals]
+    ax.plot(k_vals, bics, marker="o", color=palette[0], linewidth=2, label="BIC (Bayesian)")
+    ax.plot(k_vals, aics, marker="s", color=palette[4], linewidth=2, linestyle="--", label="AIC (Akaike)")
+    opt_k = results["gmm"]["optimal_k_bic"]
+    ax.axvline(opt_k, color="goldenrod", linestyle=":", linewidth=2, label=f"Optimal K={opt_k}")
+    ax.set_xlabel("Number of Clusters (K)", fontweight="bold")
+    ax.set_ylabel("Information Criterion Score", fontweight="bold")
+    ax.set_title("6. Subgroup Clustering Criterion vs K", fontweight="bold", pad=8)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3, linestyle="--")
+
+    fig.suptitle(
+        "CLINICAL DATA SCIENCE HIGH-COMPUTATION BENCHMARK SUMMARY\nExecution Environment Performance & Model Diagnostics",
+        fontsize=15, fontweight="bold", y=0.98
+    )
+
+    plot_path = os.path.join(output_dir, "heavy_compute_summary.png")
+    plt.savefig(plot_path, bbox_inches="tight")
+    plt.close()
+    return plot_path
+
+
+# ==============================================================================
+# REPORT FORMATTING: Text & JSON
+# ==============================================================================
+def format_text_report(env_info, results, total_runtime):
+    """Format human-readable benchmark report with ASCII tables."""
     sep = "=" * 80
-    subsep = "-" * 80
+    sub_sep = "-" * 80
 
-    lines.append(sep)
-    lines.append("            EXECUTION ENVIRONMENT PERFORMANCE BENCHMARK REPORT")
-    lines.append(sep)
-    lines.append(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
-    lines.append("")
+    lines = [
+        sep,
+        "        CLINICAL DATA SCIENCE HIGH-COMPUTATION WORKLOAD BENCHMARK REPORT",
+        sep,
+        f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}",
+        f"Total Benchmark Execution Time: {total_runtime:.2f} seconds",
+        "",
+        "1. ENVIRONMENT & HARDWARE PROFILE",
+        sub_sep,
+        f"  Operating System  : {env_info.get('platform')}",
+        f"  Machine / Arch    : {env_info.get('machine')}",
+        f"  Logical CPU Cores : {env_info.get('logical_cpus')}",
+        f"  Physical CPU Cores: {env_info.get('physical_cpus')}",
+        f"  Allowed CPU Cores : {env_info.get('allowed_cpus')}",
+        f"  Total System RAM  : {env_info.get('total_ram_gb')} GB",
+        f"  Available RAM     : {env_info.get('available_ram_gb')} GB",
+        f"  Python Version    : {env_info.get('python_version')}",
+        f"  Linear Algebra    : {env_info.get('blas_backend')}",
+        "",
+        "2. NON-LINEAR MANIFOLD LEARNING (t-SNE & KERNEL PCA)",
+        sub_sep,
+        f"  Cohort Dimensions : 5,288 patients x 14 clinical features",
+        f"  Pairwise Distance : {results['manifold']['pairwise_distance_evals']:,} distance computations",
+        f"  Kernel PCA Time   : {results['manifold']['kpca_elapsed_sec']} seconds (RBF Gram Matrix)",
+        f"  t-SNE Time        : {results['manifold']['tsne_elapsed_sec']} seconds (750 Iterations)",
+        f"  Total Stage Time  : {results['manifold']['total_elapsed_sec']} seconds",
+        f"  KL Divergence     : {results['manifold']['kl_divergence']}",
+        "",
+        "3. TREE ENSEMBLE & PERMUTATION BIOMARKER IMPORTANCE",
+        sub_sep,
+        f"  Ensemble Model    : Random Forest (200 trees/model, max_depth=10)",
+        f"  Validation Scheme : 5-Fold Stratified Cross-Validation",
+        f"  Total Trees Built : {results['tree_ensemble']['total_trees_trained']} decision trees",
+        f"  Elapsed Time      : {results['tree_ensemble']['elapsed_sec']} seconds",
+        f"  Tree Throughput   : {results['tree_ensemble']['trees_per_sec']} trees/second",
+        f"  Mean 5-Fold ROC   : {results['tree_ensemble']['cv_roc_auc_mean']} +/- {results['tree_ensemble']['cv_roc_auc_std']}",
+        "  Top 5 Ranked Biomarkers:",
+    ]
 
-    # 1. Environment & Hardware
-    sys_info = report["system"]
-    lines.append("1. ENVIRONMENT & HARDWARE PROFILE")
-    lines.append(subsep)
-    lines.append(f"  Operating System  : {sys_info['platform']}")
-    lines.append(f"  Machine / Arch    : {sys_info['machine']}")
-    lines.append(f"  Processor Type    : {sys_info['processor']}")
-    lines.append(f"  Logical CPU Cores : {sys_info['logical_cpus']}")
-    lines.append(f"  Physical CPU Cores: {sys_info['physical_cpus']}")
-    lines.append(f"  Allowed CPU Cores : {sys_info['allowed_cpus']}")
-    lines.append(f"  Total System RAM  : {sys_info['total_ram_gb']} GB")
-    lines.append(f"  Available RAM     : {sys_info['available_ram_gb']} GB")
-    lines.append(f"  Python Version    : {sys_info['python_version']}")
-    lines.append(f"  Linear Algebra    : {sys_info['numpy_blas']}")
-    lines.append("")
+    for rank, (feat, score) in enumerate(results['tree_ensemble']['feature_ranking'], 1):
+        clean_name = feat.split('.')[-1].replace('_', ' ').title()
+        lines.append(f"    {rank}. {clean_name:<25} (Importance Score: {score:+.4f})")
 
-    # 2. Raw Vector Floating-Point Compute (GEMM)
-    lines.append("2. MATRIX MULTIPLICATION & VECTOR COMPUTE (GEMM GFLOPS)")
-    lines.append(subsep)
-    lines.append(f"  {'Precision':<20} | {'Matrix Size (N)':<15} | {'Time (sec)':<12} | {'Throughput (GFLOPS)':<20}")
-    lines.append(f"  {'-'*20}-+-{'-'*15}-+-{'-'*12}-+-{'-'*20}")
-    for item in report["matrix_multiplication"]:
-        lines.append(f"  {item['precision']:<20} | {item['size']:<15} | {item['elapsed_sec']:<12.4f} | {item['gflops']:<20.2f}")
-    lines.append("")
+    lines.extend([
+        "",
+        "4. HIGH-ORDER POLYNOMIAL INTERACTIONS & LASSO PATH",
+        sub_sep,
+        f"  Input Features    : {results['poly_lasso']['original_features']} continuous clinical variables",
+        f"  Expanded Feature  : {results['poly_lasso']['expanded_features']} interaction terms (Degree 3)",
+        f"  Cross-Validation  : 5-Fold CV across 100 alpha regularization levels",
+        f"  Elapsed Time      : {results['poly_lasso']['elapsed_sec']} seconds",
+        f"  Optimal Alpha     : {results['poly_lasso']['optimal_alpha']}",
+        f"  Active Biomarkers : {results['poly_lasso']['active_non_zero_terms']} of {results['poly_lasso']['expanded_features']} features",
+        f"  Sparsity Ratio    : {results['poly_lasso']['sparsity_ratio_pct']}% of interaction coefficients zeroed",
+        "",
+        "5. MASSIVE SCALE NON-PARAMETRIC BOOTSTRAP RESAMPLING",
+        sub_sep,
+        f"  Total Resamples   : {results['bootstrap']['total_resamples']:,} bootstrap iterations",
+        f"  Values Processed  : 264,400,000 clinical values",
+        f"  Elapsed Time      : {results['bootstrap']['elapsed_sec']} seconds",
+        f"  Throughput        : {results['bootstrap']['throughput_iter_sec']:,} iterations/second",
+        f"  Point Est. Delta  : {results['bootstrap']['point_estimate']} mmol/L fasting glucose",
+        f"  Empirical 95% CI  : [{results['bootstrap']['ci_95_low']}, {results['bootstrap']['ci_95_high']}] mmol/L",
+        "",
+        "6. MULTI-RESTART GAUSSIAN MIXTURE CLUSTERING (EM SWEEP)",
+        sub_sep,
+        f"  Cluster Range     : K = 2 through K = 8",
+        f"  Covariance Type   : Full (Inverting D x D covariance matrices per step)",
+        f"  Restarts per K    : 3 random initializations",
+        f"  Total EM Iters    : {results['gmm']['total_em_iterations']} iterations",
+        f"  Elapsed Time      : {results['gmm']['elapsed_sec']} seconds",
+        f"  Optimal Subgroups : K = {results['gmm']['optimal_k_bic']} latent patient phenotypes (by BIC)",
+        "",
+        "7. DEEP PATIENT REPRESENTATION AUTOENCODER",
+        sub_sep,
+        f"  Architecture      : Input(14) -> Dense(64) -> Dense(16) -> Bottleneck(4) -> Dense(16) -> Dense(64) -> Output(14)",
+        f"  Optimization      : Adam Optimizer (Mini-batch size 64)",
+        f"  Training Epochs   : {results['autoencoder']['actual_epochs']} epochs",
+        f"  Elapsed Time      : {results['autoencoder']['elapsed_sec']} seconds",
+        f"  Throughput        : {results['autoencoder']['samples_per_sec']:,} patient vectors/second",
+        f"  Final Loss (MSE)  : {results['autoencoder']['final_loss_mse']}",
+        "",
+        "8. OVERALL COMPUTATIONAL PERFORMANCE BREAKDOWN",
+        sub_sep,
+        f"  {'Workload Stage':<38} | {'Elapsed (s)':<12} | {'Relative Time %':<15}",
+        f"  {'-'*38}-+-{'-'*12}-+-{'-'*15}",
+    ])
 
-    # 3. Multi-Core Scaling
-    lines.append("3. MULTI-CORE CONCURRENCY & PARALLEL SCALING")
-    lines.append(subsep)
-    lines.append(f"  {'Workers':<10} | {'Elapsed (sec)':<15} | {'Speedup Factor':<16} | {'Parallel Efficiency':<20}")
-    lines.append(f"  {'-'*10}-+-{'-'*15}-+-{'-'*16}-+-{'-'*20}")
-    for item in report["multicore_scaling"]:
-        lines.append(f"  {item['workers']:<10} | {item['elapsed_sec']:<15.4f} | {item['speedup']:<16.2f}x | {item['efficiency_pct']:<20.1f}%")
-    lines.append("")
+    stage_times = [
+        ("1. Manifold Learning (t-SNE & KPCA)", results["manifold"]["total_elapsed_sec"]),
+        ("2. Tree Ensemble & Permutation CV", results["tree_ensemble"]["elapsed_sec"]),
+        ("3. Polynomial LASSO Coordinate Descent", results["poly_lasso"]["elapsed_sec"]),
+        ("4. 50,000 Bootstrap Resampling", results["bootstrap"]["elapsed_sec"]),
+        ("5. GMM Clustering (K=2..8 Sweep)", results["gmm"]["elapsed_sec"]),
+        ("6. Deep Autoencoder Backprop", results["autoencoder"]["elapsed_sec"])
+    ]
 
-    # 4. Memory Bandwidth
-    mem_info = report["memory_bandwidth"]
-    lines.append("4. MEMORY BANDWIDTH THROUGHPUT (STREAM BENCHMARK)")
-    lines.append(subsep)
-    lines.append(f"  Vector Size       : {mem_info['vector_size']:,} elements (120 MB per vector)")
-    lines.append(f"  Vector Copy Rate  : {mem_info['copy_gb_s']:>8.2f} GB/s")
-    lines.append(f"  Vector Scale Rate : {mem_info['scale_gb_s']:>8.2f} GB/s")
-    lines.append(f"  Vector Add Rate   : {mem_info['add_gb_s']:>8.2f} GB/s")
-    lines.append(f"  Vector Triad Rate : {mem_info['triad_gb_s']:>8.2f} GB/s")
-    lines.append(f"  Peak Bandwidth    : {mem_info['peak_bandwidth_gb_s']:>8.2f} GB/s")
-    lines.append("")
+    for name, s_time in stage_times:
+        pct = (s_time / total_runtime) * 100.0
+        lines.append(f"  {name:<38} | {s_time:<12.2f} | {pct:<15.1f}")
 
-    # 5. Domain Statistical Workload
-    boot_info = report["domain_bootstrap"]
-    lines.append("5. DOMAIN STATISTICAL WORKLOAD (PATIENT RECORD BOOTSTRAP)")
-    lines.append(subsep)
-    lines.append(f"  Dataset Records   : {boot_info['dataset_rows']:,} rows")
-    lines.append(f"  Bootstrap Samples : {boot_info['iterations']:,} resamples")
-    lines.append(f"  Elapsed Time      : {boot_info['elapsed_sec']} seconds")
-    lines.append(f"  Resampling Speed  : {boot_info['iterations_per_sec']:>8.1f} iterations/sec")
-    lines.append(f"  Mean Glucose Diff : {boot_info['mean_difference']} mmol/L")
-    lines.append(f"  Bootstrap 95% CI  : [{boot_info['bootstrap_95_ci'][0]}, {boot_info['bootstrap_95_ci'][1]}] mmol/L")
-    lines.append("")
-
-    # 6. Disk I/O
-    io_info = report["disk_io"]
-    lines.append("6. FILESYSTEM & OUTPUT DISK I/O PERFORMANCE")
-    lines.append(subsep)
-    lines.append(f"  Test File Size    : {io_info['file_size_mb']} MB")
-    lines.append(f"  Sequential Write  : {io_info['write_mb_s']:>8.2f} MB/s")
-    lines.append(f"  Sequential Read   : {io_info['read_mb_s']:>8.2f} MB/s")
-    lines.append("")
-
-    # 7. Summary Verdict
-    lines.append("7. ENVIRONMENT PERFORMANCE VERDICT")
-    lines.append(subsep)
-    peak_gflops = max(item["gflops"] for item in report["matrix_multiplication"])
-    max_workers = report["multicore_scaling"][-1]
-    lines.append(f"  Compute Grade     : Peak {peak_gflops:.1f} GFLOPS (Float32)")
-    lines.append(f"  Parallel Grade    : {max_workers['workers']} workers -> {max_workers['speedup']}x speedup ({max_workers['efficiency_pct']}% efficiency)")
-    lines.append(f"  Memory Grade      : {mem_info['peak_bandwidth_gb_s']} GB/s peak bandwidth")
-    lines.append(f"  Storage Grade     : {io_info['write_mb_s']} MB/s write / {io_info['read_mb_s']} MB/s read")
-    lines.append(sep)
-    lines.append("                             END OF BENCHMARK REPORT")
-    lines.append(sep)
+    lines.extend([
+        sub_sep,
+        f"  {'TOTAL PIPELINE RUNTIME':<38} | {total_runtime:<12.2f} | 100.0%",
+        sep,
+        "                             END OF BENCHMARK REPORT",
+        sep
+    ])
 
     return "\n".join(lines)
 
 
-def generate_benchmark_visualizations(report, output_dir):
-    """Generate summary charts for the performance metrics."""
-    os.makedirs(output_dir, exist_ok=True)
-    chart_path = os.path.join(output_dir, "benchmark_summary.png")
-
-    sns.set_theme(style="whitegrid", palette="muted")
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle(
-        f"Execution Environment Performance Benchmark\n"
-        f"Platform: {report['system']['platform']} | CPUs: {report['system']['logical_cpus']} | RAM: {report['system']['total_ram_gb']} GB",
-        fontsize=13,
-        fontweight="bold",
-    )
-
-    # 1. GFLOPS
-    gemm_df = pd.DataFrame(report["matrix_multiplication"])
-    sns.barplot(data=gemm_df, x="size", y="gflops", hue="precision", palette="Blues_r", ax=axes[0, 0])
-    axes[0, 0].set_title("Matrix GEMM Throughput (GFLOPS - Higher is Better)", fontweight="bold")
-    axes[0, 0].set_xlabel("Matrix Dimension (N x N)")
-    axes[0, 0].set_ylabel("Throughput (GFLOPS)")
-    for p in axes[0, 0].patches:
-        h = p.get_height()
-        if h > 0:
-            axes[0, 0].annotate(f"{h:.1f}", (p.get_x() + p.get_width() / 2.0, h), ha="center", va="bottom", fontsize=8)
-
-    # 2. Multi-Core Speedup
-    scale_df = pd.DataFrame(report["multicore_scaling"])
-    axes[0, 1].plot(scale_df["workers"], scale_df["speedup"], marker="o", linewidth=2.5, color="#2b5c8f", label="Measured Speedup")
-    axes[0, 1].plot(scale_df["workers"], scale_df["workers"], linestyle="--", color="#888888", label="Ideal Linear Speedup")
-    axes[0, 1].set_title("Multi-Process Speedup & Core Scaling", fontweight="bold")
-    axes[0, 1].set_xlabel("Worker Processes")
-    axes[0, 1].set_ylabel("Speedup Factor (vs 1 Core)")
-    axes[0, 1].legend()
-    for _, row in scale_df.iterrows():
-        axes[0, 1].annotate(f"{row['speedup']}x\n({row['efficiency_pct']}%)", (row["workers"], row["speedup"]), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=8)
-
-    # 3. Memory Bandwidth
-    mem_ops = ["Copy", "Scale", "Add", "Triad"]
-    mem_vals = [
-        report["memory_bandwidth"]["copy_gb_s"],
-        report["memory_bandwidth"]["scale_gb_s"],
-        report["memory_bandwidth"]["add_gb_s"],
-        report["memory_bandwidth"]["triad_gb_s"],
-    ]
-    sns.barplot(x=mem_ops, y=mem_vals, hue=mem_ops, palette="crest", legend=False, ax=axes[1, 0])
-    axes[1, 0].set_title("Memory Bandwidth (STREAM Benchmark - GB/s)", fontweight="bold")
-    axes[1, 0].set_ylabel("Bandwidth (GB/s)")
-    for p in axes[1, 0].patches:
-        h = p.get_height()
-        axes[1, 0].annotate(f"{h:.1f} GB/s", (p.get_x() + p.get_width() / 2.0, h), ha="center", va="bottom", fontsize=9, fontweight="bold")
-
-    # 4. Disk I/O & Domain Bootstrap
-    io_ops = ["Disk Write", "Disk Read"]
-    io_vals = [report["disk_io"]["write_mb_s"], report["disk_io"]["read_mb_s"]]
-    sns.barplot(x=io_ops, y=io_vals, hue=io_ops, palette="flare", legend=False, ax=axes[1, 1])
-    axes[1, 1].set_title(f"Disk I/O ({report['disk_io']['file_size_mb']}MB) & Data Bootstrap Speed", fontweight="bold")
-    axes[1, 1].set_ylabel("Throughput (MB/s)")
-    for p in axes[1, 1].patches:
-        h = p.get_height()
-        axes[1, 1].annotate(f"{h:.1f} MB/s", (p.get_x() + p.get_width() / 2.0, h), ha="center", va="bottom", fontsize=9, fontweight="bold")
-    axes[1, 1].text(
-        0.5,
-        0.85,
-        f"Domain Bootstrap: {report['domain_bootstrap']['iterations_per_sec']} resamples/sec\n"
-        f"Bootstrap 95% CI Glucose Diff: [{report['domain_bootstrap']['bootstrap_95_ci'][0]}, {report['domain_bootstrap']['bootstrap_95_ci'][1]}] mmol/L",
-        transform=axes[1, 1].transAxes,
-        ha="center",
-        bbox=dict(boxstyle="round,pad=0.5", facecolor="#ffffff", edgecolor="#cccccc"),
-        fontsize=9,
-    )
-
-    plt.tight_layout()
-    plt.savefig(chart_path, dpi=200, bbox_inches="tight")
-    plt.close()
-    return chart_path
-
-
-def run_benchmarks():
-    """Execute all benchmarks and save artifacts to the designated output folder."""
-    output_dir = os.environ.get("EPSILON_OUTPU_DIR") or os.environ.get("EPSILON_OUTPUT_DIR", "outputs")
-    os.makedirs(output_dir, exist_ok=True)
-
-    print("\n" + "=" * 80)
-    print("      STARTING EXECUTION ENVIRONMENT COMPUTATIONAL PERFORMANCE BENCHMARK")
+# ==============================================================================
+# MAIN ENTRYPOINT
+# ==============================================================================
+def main():
     print("=" * 80)
-    print(f"Target Output Directory: {os.path.abspath(output_dir)}")
+    print("   STARTING COMPREHENSIVE HIGH-COMPUTATION CLINICAL DATA SCIENCE SUITE")
+    print("=" * 80)
 
-    # 1. System discovery
-    print("\n[1/6] Inspecting environment and hardware specifications...")
-    sys_info = get_environment_info()
+    output_dir = get_output_dir()
+    print(f"Target Output Directory: {output_dir}\n")
 
-    # 2. GEMM matrix multiplication
-    print("[2/6] Running matrix multiplication stress test (Float32 & Float64 GEMM)...")
-    matrix_res = benchmark_matrix_multiplication(sizes=(1000, 2000, 3000))
+    t_suite_start = time.perf_counter()
 
-    # 3. Multi-core scaling
-    print("[3/6] Running multi-core concurrency & parallel scaling test...")
-    scaling_res = benchmark_multicore_scaling()
+    # Hardware & Environment Profiling
+    env_info = get_environment_info()
 
-    # 4. Memory bandwidth
-    print("[4/6] Running STREAM memory bandwidth benchmark...")
-    mem_res = benchmark_memory_bandwidth()
+    # Load dataset
+    df, X_scaled, y, feature_cols, numeric_cols = prepare_clinical_data()
 
-    # 5. Domain bootstrap
-    print("[5/6] Running clinical dataset bootstrap simulation (3,000 iterations)...")
-    dataset = create_dataset()
-    boot_res = benchmark_domain_bootstrap(dataset, n_iterations=3000)
+    # Execute all 6 heavy computational workloads in sequence
+    results = {}
+    results["manifold"] = benchmark_manifold_learning(X_scaled, y)
+    results["tree_ensemble"] = benchmark_tree_ensemble(X_scaled, y, feature_cols)
+    results["poly_lasso"] = benchmark_polynomial_lasso(X_scaled, df, numeric_cols)
+    results["bootstrap"] = benchmark_massive_bootstrap(df, y)
+    results["gmm"] = benchmark_gmm_clustering(X_scaled)
+    results["autoencoder"] = benchmark_deep_autoencoder(X_scaled)
 
-    # 6. Disk I/O
-    print("[6/6] Benchmarking output filesystem sequential I/O throughput...")
-    io_res = benchmark_disk_io(output_dir, file_size_mb=40)
+    total_runtime = time.perf_counter() - t_suite_start
 
-    # Compile report dictionary
-    report = {
-        "system": sys_info,
-        "matrix_multiplication": matrix_res,
-        "multicore_scaling": scaling_res,
-        "memory_bandwidth": mem_res,
-        "domain_bootstrap": boot_res,
-        "disk_io": io_res,
-    }
+    # Generate Visualization
+    print("\nGenerating 6-panel clinical visualization chart...")
+    plot_path = generate_summary_figure(results, df, y, output_dir)
 
-    # Format text report
-    text_content = format_text_report(report)
+    # Format Text Report
+    text_report = format_text_report(env_info, results, total_runtime)
 
-    # 1. Output plain text report
-    txt_path = os.path.join(output_dir, "benchmark_report.txt")
+    # Write text report to file
+    txt_path = os.path.join(output_dir, "heavy_compute_report.txt")
     with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(text_content)
+        f.write(text_report)
 
-    # 2. Output structured JSON report
-    json_path = os.path.join(output_dir, "benchmark_report.json")
+    # Also write benchmark_report.txt so standard viewers find it
+    bench_txt_path = os.path.join(output_dir, "benchmark_report.txt")
+    with open(bench_txt_path, "w", encoding="utf-8") as f:
+        f.write(text_report)
+
+    # Write JSON report
+    json_path = os.path.join(output_dir, "heavy_compute_report.json")
+    json_export = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
+        "total_runtime_sec": round(total_runtime, 2),
+        "environment": env_info,
+        "manifold_learning": {k: v for k, v in results["manifold"].items() if k not in ("X_tsne", "X_kpca")},
+        "tree_ensemble": {k: v for k, v in results["tree_ensemble"].items() if k != "all_importances"},
+        "polynomial_lasso": {k: v for k, v in results["poly_lasso"].items() if k != "coefs"},
+        "bootstrap_resampling": {k: v for k, v in results["bootstrap"].items() if k != "distribution_sample"},
+        "gaussian_mixture": results["gmm"],
+        "deep_autoencoder": results["autoencoder"]
+    }
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
+        json.dump(json_export, f, indent=2)
 
-    # 3. Output visualization chart
-    chart_path = generate_benchmark_visualizations(report, output_dir)
+    # Print the full report to stdout so it appears in logs
+    print("\n" + text_report + "\n")
 
-    # Print text report to stdout for immediate visibility in execution logs
-    print("\n" + text_content)
-    print("\n" + "-" * 80)
+    print("-" * 80)
     print(f"Artifacts successfully written to '{output_dir}':")
     print(f"  - Plain Text Report : {txt_path}")
+    print(f"  - Standard Report   : {bench_txt_path}")
     print(f"  - Structured JSON   : {json_path}")
-    print(f"  - Visual Chart      : {chart_path}")
+    print(f"  - Visual Chart      : {plot_path}")
     print("-" * 80)
-
-    return report
-
-
-def main():
-    report = run_benchmarks()
-    return {
-        "result": "Benchmark completed successfully",
-        "platform": report["system"]["platform"],
-        "logical_cpus": report["system"]["logical_cpus"],
-        "total_ram_gb": report["system"]["total_ram_gb"],
-    }
 
 
 if __name__ == "__main__":

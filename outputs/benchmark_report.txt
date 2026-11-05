@@ -1,71 +1,94 @@
 ================================================================================
-            EXECUTION ENVIRONMENT PERFORMANCE BENCHMARK REPORT
+        CLINICAL DATA SCIENCE HIGH-COMPUTATION WORKLOAD BENCHMARK REPORT
 ================================================================================
-Timestamp: 2026-11-05 08:16:02 UTC
+Timestamp: 2026-11-05 08:39:36 UTC
+Total Benchmark Execution Time: 26.61 seconds
 
 1. ENVIRONMENT & HARDWARE PROFILE
 --------------------------------------------------------------------------------
   Operating System  : Windows-11-10.0.26200-SP0
   Machine / Arch    : AMD64
-  Processor Type    : Intel64 Family 6 Model 189 Stepping 1, GenuineIntel
   Logical CPU Cores : 8
   Physical CPU Cores: 8
   Allowed CPU Cores : 8
   Total System RAM  : 15.66 GB
-  Available RAM     : 1.13 GB
+  Available RAM     : 1.35 GB
   Python Version    : 3.14.2
   Linear Algebra    : Optimized BLAS (OpenBLAS/MKL/Accelerate)
 
-2. MATRIX MULTIPLICATION & VECTOR COMPUTE (GEMM GFLOPS)
+2. NON-LINEAR MANIFOLD LEARNING (t-SNE & KERNEL PCA)
 --------------------------------------------------------------------------------
-  Precision            | Matrix Size (N) | Time (sec)   | Throughput (GFLOPS) 
-  ---------------------+-----------------+--------------+---------------------
-  Float32 (Single)     | 1000            | 0.0066       | 301.45              
-  Float32 (Single)     | 2000            | 0.0709       | 225.68              
-  Float32 (Single)     | 3000            | 0.1324       | 407.98              
-  Float64 (Double)     | 1000            | 0.0223       | 89.67               
-  Float64 (Double)     | 2000            | 0.0760       | 210.63              
-  Float64 (Double)     | 3000            | 0.2518       | 214.49              
+  Cohort Dimensions : 5,288 patients x 14 clinical features
+  Pairwise Distance : 13,978,828 distance computations
+  Kernel PCA Time   : 0.73 seconds (RBF Gram Matrix)
+  t-SNE Time        : 7.907 seconds (750 Iterations)
+  Total Stage Time  : 8.637 seconds
+  KL Divergence     : 1.517
 
-3. MULTI-CORE CONCURRENCY & PARALLEL SCALING
+3. TREE ENSEMBLE & PERMUTATION BIOMARKER IMPORTANCE
 --------------------------------------------------------------------------------
-  Workers    | Elapsed (sec)   | Speedup Factor   | Parallel Efficiency 
-  -----------+-----------------+------------------+---------------------
-  1          | 5.1380          | 1.00            x | 100.0               %
-  2          | 3.9612          | 1.30            x | 64.9                %
-  4          | 4.0413          | 1.27            x | 31.8                %
-  8          | 4.9860          | 1.03            x | 12.9                %
+  Ensemble Model    : Random Forest (200 trees/model, max_depth=10)
+  Validation Scheme : 5-Fold Stratified Cross-Validation
+  Total Trees Built : 1200 decision trees
+  Elapsed Time      : 9.374 seconds
+  Tree Throughput   : 128.0 trees/second
+  Mean 5-Fold ROC   : 0.6211 +/- 0.0227
+  Top 5 Ranked Biomarkers:
+    1. Bmi                       (Importance Score: +0.0075)
+    2. Age                       (Importance Score: +0.0075)
+    3. Glucose                   (Importance Score: +0.0073)
+    4. Hypertensive              (Importance Score: +0.0071)
+    5. Pulse Rate                (Importance Score: +0.0070)
 
-4. MEMORY BANDWIDTH THROUGHPUT (STREAM BENCHMARK)
+4. HIGH-ORDER POLYNOMIAL INTERACTIONS & LASSO PATH
 --------------------------------------------------------------------------------
-  Vector Size       : 15,000,000 elements (120 MB per vector)
-  Vector Copy Rate  :     4.35 GB/s
-  Vector Scale Rate :     6.15 GB/s
-  Vector Add Rate   :    25.50 GB/s
-  Vector Triad Rate :     3.74 GB/s
-  Peak Bandwidth    :    25.50 GB/s
+  Input Features    : 6 continuous clinical variables
+  Expanded Feature  : 83 interaction terms (Degree 3)
+  Cross-Validation  : 5-Fold CV across 100 alpha regularization levels
+  Elapsed Time      : 0.132 seconds
+  Optimal Alpha     : 0.05387
+  Active Biomarkers : 3 of 83 features
+  Sparsity Ratio    : 96.4% of interaction coefficients zeroed
 
-5. DOMAIN STATISTICAL WORKLOAD (PATIENT RECORD BOOTSTRAP)
+5. MASSIVE SCALE NON-PARAMETRIC BOOTSTRAP RESAMPLING
 --------------------------------------------------------------------------------
-  Dataset Records   : 5,288 rows
-  Bootstrap Samples : 3,000 resamples
-  Elapsed Time      : 0.435 seconds
-  Resampling Speed  :   6902.6 iterations/sec
-  Mean Glucose Diff : 0.31 mmol/L
-  Bootstrap 95% CI  : [-0.06, 0.69] mmol/L
+  Total Resamples   : 50,000 bootstrap iterations
+  Values Processed  : 264,400,000 clinical values
+  Elapsed Time      : 1.804 seconds
+  Throughput        : 27,719.9 iterations/second
+  Point Est. Delta  : 0.311 mmol/L fasting glucose
+  Empirical 95% CI  : [-0.052, 0.686] mmol/L
 
-6. FILESYSTEM & OUTPUT DISK I/O PERFORMANCE
+6. MULTI-RESTART GAUSSIAN MIXTURE CLUSTERING (EM SWEEP)
 --------------------------------------------------------------------------------
-  Test File Size    : 40 MB
-  Sequential Write  :   738.88 MB/s
-  Sequential Read   :  1644.17 MB/s
+  Cluster Range     : K = 2 through K = 8
+  Covariance Type   : Full (Inverting D x D covariance matrices per step)
+  Restarts per K    : 3 random initializations
+  Total EM Iters    : 300 iterations
+  Elapsed Time      : 1.498 seconds
+  Optimal Subgroups : K = 8 latent patient phenotypes (by BIC)
 
-7. ENVIRONMENT PERFORMANCE VERDICT
+7. DEEP PATIENT REPRESENTATION AUTOENCODER
 --------------------------------------------------------------------------------
-  Compute Grade     : Peak 408.0 GFLOPS (Float32)
-  Parallel Grade    : 8 workers -> 1.03x speedup (12.9% efficiency)
-  Memory Grade      : 25.5 GB/s peak bandwidth
-  Storage Grade     : 738.88 MB/s write / 1644.17 MB/s read
+  Architecture      : Input(14) -> Dense(64) -> Dense(16) -> Bottleneck(4) -> Dense(16) -> Dense(64) -> Output(14)
+  Optimization      : Adam Optimizer (Mini-batch size 64)
+  Training Epochs   : 150 epochs
+  Elapsed Time      : 5.023 seconds
+  Throughput        : 157,912.1 patient vectors/second
+  Final Loss (MSE)  : 0.13878
+
+8. OVERALL COMPUTATIONAL PERFORMANCE BREAKDOWN
+--------------------------------------------------------------------------------
+  Workload Stage                         | Elapsed (s)  | Relative Time %
+  ---------------------------------------+--------------+----------------
+  1. Manifold Learning (t-SNE & KPCA)    | 8.64         | 32.5           
+  2. Tree Ensemble & Permutation CV      | 9.37         | 35.2           
+  3. Polynomial LASSO Coordinate Descent | 0.13         | 0.5            
+  4. 50,000 Bootstrap Resampling         | 1.80         | 6.8            
+  5. GMM Clustering (K=2..8 Sweep)       | 1.50         | 5.6            
+  6. Deep Autoencoder Backprop           | 5.02         | 18.9           
+--------------------------------------------------------------------------------
+  TOTAL PIPELINE RUNTIME                 | 26.61        | 100.0%
 ================================================================================
                              END OF BENCHMARK REPORT
 ================================================================================

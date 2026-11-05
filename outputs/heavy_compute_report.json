@@ -1,0 +1,119 @@
+{
+  "timestamp": "2026-11-05 08:39:36 UTC",
+  "total_runtime_sec": 26.61,
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python_version": "3.14.2",
+    "machine": "AMD64",
+    "processor": "Intel64 Family 6 Model 189 Stepping 1, GenuineIntel",
+    "logical_cpus": 8,
+    "allowed_cpus": 8,
+    "total_ram_gb": 15.66,
+    "available_ram_gb": 1.35,
+    "physical_cpus": 8,
+    "blas_backend": "Optimized BLAS (OpenBLAS/MKL/Accelerate)"
+  },
+  "manifold_learning": {
+    "kpca_elapsed_sec": 0.73,
+    "tsne_elapsed_sec": 7.907,
+    "total_elapsed_sec": 8.637,
+    "pairwise_distance_evals": 13978828,
+    "kl_divergence": 1.517
+  },
+  "tree_ensemble": {
+    "elapsed_sec": 9.374,
+    "total_trees_trained": 1200,
+    "trees_per_sec": 128.0,
+    "cv_roc_auc_mean": 0.6211,
+    "cv_roc_auc_std": 0.0227,
+    "feature_ranking": [
+      [
+        "anthropometry.bmi",
+        0.007545385779122504
+      ],
+      [
+        "demographics.age",
+        0.0074697428139182676
+      ],
+      [
+        "labs.glucose",
+        0.0072617246596066165
+      ],
+      [
+        "history.hypertensive",
+        0.007072617246596025
+      ],
+      [
+        "vitals.pulse_rate",
+        0.006996974281391788
+      ]
+    ]
+  },
+  "polynomial_lasso": {
+    "elapsed_sec": 0.132,
+    "original_features": 6,
+    "expanded_features": 83,
+    "optimal_alpha": 0.05387,
+    "active_non_zero_terms": 3,
+    "sparsity_ratio_pct": 96.4
+  },
+  "bootstrap_resampling": {
+    "elapsed_sec": 1.804,
+    "total_resamples": 50000,
+    "throughput_iter_sec": 27719.9,
+    "point_estimate": 0.311,
+    "ci_95_low": -0.052,
+    "ci_95_high": 0.686
+  },
+  "gaussian_mixture": {
+    "elapsed_sec": 1.498,
+    "k_range": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "bics": {
+      "2": 71249.6,
+      "3": -33719.1,
+      "4": -100.2,
+      "5": -53892.9,
+      "6": -92246.9,
+      "7": -132500.9,
+      "8": -136394.7
+    },
+    "aics": {
+      "2": 69678.6,
+      "3": -36078.9,
+      "4": -3248.7,
+      "5": -57830.3,
+      "6": -96973.0,
+      "7": -138015.8,
+      "8": -142698.4
+    },
+    "optimal_k_bic": 8,
+    "total_em_iterations": 300
+  },
+  "deep_autoencoder": {
+    "elapsed_sec": 5.023,
+    "target_epochs": 150,
+    "actual_epochs": 150,
+    "final_loss_mse": 0.13878,
+    "samples_per_sec": 157912.1,
+    "loss_curve": [
+      0.14016,
+      0.14029,
+      0.1404,
+      0.13982,
+      0.14006,
+      0.13934,
+      0.13901,
+      0.13955,
+      0.13978,
+      0.13878
+    ]
+  }
+}
